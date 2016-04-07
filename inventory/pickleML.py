@@ -1,14 +1,18 @@
+"""
+This file contains Spark functions relevant to classifier construction.
+"""
+
 from pyspark import SparkContext
 from pyspark.sql import SQLContext
 from pyspark.mllib.linalg import Vectors
 from pyspark.ml.classification import RandomForestClassifier
 from pyspark.ml.classification import LogisticRegression
 from pyspark.ml.feature import StringIndexer
+
 import numpy as np
 from random import *
 
-sc = SparkContext("local", "Pickle")
-sqlContext = SQLContext(sc)
+import boto3
 
 # CHECKED
 # generate public matrix Z to send to each user
@@ -63,7 +67,8 @@ def findXu(Xmodu, Tu):
 # create a dataframe for machine learning from the user supplied vectors
 # Xmodus: dict where key = user and value = ndarray
 # yus: dict where key = user and value = vectors
-def createDF(Xmodus, Tus, yus):
+# sc and sqlContext are spark and sql contexts respectively
+def createDF(Xmodus, Tus, yus, sc, sqlContext):
     # Note: ndarray -> rdd -> rdd of tuples -> dataframe
 
     # obtain array with appropriate features and labels (label first column)
@@ -93,6 +98,7 @@ def createRFC(df):
     return rf.fit(td)
 
 # testing
+"""
 F = 5
 Q = 3
 V = 10
@@ -108,11 +114,4 @@ yus['u2'] = np.random.rand(1, V)
 df = createDF(Xmodus, Tus, yus)
 rfc = createRFC(df)
 print rfc
-
-
-
-
-
-
-
-
+"""
