@@ -63,26 +63,37 @@ def findXu(Xmodu, Tu):
     return Tu.dot(Xmodu)
 
 
-# CHECKED
+# overfishing: modify to scale better: dont load from memory
 # create a dataframe for machine learning from the user supplied vectors
 # Xmodus: dict where key = user and value = ndarray
-# yus: dict where key = user and value = vectors
+# yus: dict where key = user and value = list of strings
+# Tus: dict where key = user and value = ndarray
 # sc and sqlContext are spark and sql contexts respectively
+# assume that this is only called with at least 1 user
 def createDF(Xmodus, Tus, yus, sc, sqlContext):
     # Note: ndarray -> rdd -> rdd of tuples -> dataframe
 
     # obtain array with appropriate features and labels (label first column)
     Xus = {}
+    numusers = 0 # to help in 1 user case
+    lastuser = "" # to help in 1 user case
     for user in Xmodus:
         Xus[user] = Tus[user].dot(Xmodus[user])
-    flatXus = reduce(lambda x, y: np.append(Xus[x], Xus[y], axis=1), Xus)
-    flatYus = reduce(lambda x, y: np.append(yus[x], yus[y], axis=1), yus)
-    total = np.append(flatYus, flatXus, axis=0)
+        numusers += 1
+        lastuser = user
+    if numusers == 1:
+        flatXus = Xus[lastuser]
+        flatyus = yus[lastuser]
+    else:
+        flatXus = reduce(lambda x, y: np.append(Xus[x], Xus[y], axis=1), Xus)
+        flatyus = reduce(lambda x, y: np.append(yus[x], yus[y]), yus)
+    total = np.append([flatyus], flatXus, axis=0)
     total = np.transpose(total)
 
     # create dataframe from that array
-    rdd = sc.parallelize(total)
-    rddlab = rdd.map(lambda x: (float(x[0]), Vectors.dense(x[1:len(x)])))
+    rdd = sc.parallelize(total.tolist())
+    #rddlab = rdd.map(lambda x: (float(x[0]), Vectors.dense(x[1:len(x)])))
+    rddlab = rdd.map(lambda x: (x[0], Vectors.dense(x[1:len(x)])))
     return sqlContext.createDataFrame(rddlab, ['label', 'features'])
 
 
@@ -99,6 +110,8 @@ def createRFC(df):
 
 # testing
 """
+sc = SparkContext("local", "Pickle")
+sqlContext = SQLContext(sc)
 F = 5
 Q = 3
 V = 10
@@ -109,9 +122,9 @@ Xmodus = {}
 Xmodus['u1'] = np.random.rand(Q, V)
 Xmodus['u2'] = np.random.rand(Q, V)
 yus = {}
-yus['u1'] = np.random.rand(1, V)
-yus['u2'] = np.random.rand(1, V)
-df = createDF(Xmodus, Tus, yus)
+yus['u1'] = ['a','bb','d','bb','bb','d','ac','a','bb','a']
+yus['u2'] = ['d','bb','a','ac','bb','bb','a','bd','a','ac'] #np.random.rand(1, V)
+df = createDF(Xmodus, Tus, yus, sc, sqlContext)
 rfc = createRFC(df)
 print rfc
 """
