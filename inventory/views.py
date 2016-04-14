@@ -4,6 +4,8 @@ import os
 from constants import *
 import pickleML
 
+from pyspark import SparkContext
+
 from django.shortcuts import render
 from django.http import HttpResponse
 from django.http import Http404
@@ -11,6 +13,15 @@ from django.views.decorators.csrf import csrf_exempt
 
 import boto3
 import botocore
+
+@csrf_exempt
+def testing(request):
+    os.system("{0}/spark-submit "
+              "--class org.apache.spark.examples.SparkPi "
+              "--master local[2] "
+              "{1}".format(BIN_HOME, SCRIPT))
+
+    return HttpResponse("testing")
 
 # overfishing: in conjunction with decorator use auth mech like from drf
 @csrf_exempt
@@ -22,7 +33,7 @@ def index(request):
 
         return HttpResponse("GET RESPONSE")
 
-    # json contains "label", "category", "features", and "userid"
+    # json contains "label", "category", "features", "userid", and "
     # overfishing: this is a minimal version to go through one workflow execution
     # overfishing: later on i will add rds integration and other good stuff
     # note: files have names like userid:X, userid:cov, userid:mean, etc
@@ -136,14 +147,6 @@ def meancov(request):
 
     return HttpResponse("post request unsuccessful")
 
-# overfishing launch cluster, submit script, then terminate
-@csrf_exempt
-def testing(request):
-
-    updateClassifier()
-
-    return HttpResponse("testing")
-
 # update classifier
 # to be called asynchronously
 # launch cluster, submit classifier construction/modification to cluster, terminate cluster
@@ -173,14 +176,3 @@ def updateClassifier():
 
 
     # release lock
-
-"""
-def item_detail(request, id):
-	try:
-		item = Item.objects.get(id=id)
-	except Item.DoesNotExist:
-		raise Http404('This item does not exist')
-	return render(request, 'inventory/item_detail.html', {
-		'item': item,
-	})
-"""
