@@ -16,10 +16,11 @@ def findTu(Z, Zu):
 # Xmodus: dict where key = user and value = ndarray
 # yus: dict where key = user and value = list of strings
 # Tus: dict where key = user and value = ndarray
+# dict: dict where key = label and value = int
 # sc and sqlContext are spark and sql contexts respectively
 # assume that this is only called with at least 1 user
-# returns (rdd of LabeledPoint, dict of label: value)
-def createRDDandDict(Xmodus, Tus, yus, sc):
+# returns (rdd of LabeledPoint, dict of label: int)
+def createRDDandDict(Xmodus, Tus, yus, dict, sc):
     # Note: ndarray -> rdd -> rdd of tuples -> dataframe
 
     # obtain array with appropriate features and labels (label first column)
@@ -39,18 +40,9 @@ def createRDDandDict(Xmodus, Tus, yus, sc):
     total = np.append([flatyus], flatXus, axis=0)
     total = np.transpose(total)
 
-    # create dict from yus
-    labelset = set(flatyus)
-    index = 0
-    dict = {}
-    for label in labelset:
-        dict[label] = index
-        index += 1
-
     # create rdd from that array
     rdd = sc.parallelize(total.tolist())
-    rddlab = rdd.map(lambda x: LabeledPoint(dict[x[0]], x[1:]))
-    return (rddlab, dict)
+    return rdd.map(lambda x: LabeledPoint(dict[x[0]], x[1:]))
 
 
 # create random forest classifier from rdd of labeledpoint(num, [num,num])

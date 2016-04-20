@@ -1,37 +1,22 @@
 import numpy as np
-import os
+from multiprocessing import Process
 
 from constants import *
 import pickleML
 
-from pyspark import SparkContext
-
-from django.shortcuts import render
+from django.apps import apps
 from django.http import HttpResponse
-from django.http import Http404
 from django.views.decorators.csrf import csrf_exempt
 
 import boto3
-import botocore
 
 @csrf_exempt
 def testing(request):
-    os.system("{0}/spark-submit "
-              "--class org.apache.spark.examples.SparkPi "
-              "--master local[2] "
-              "{1}".format(BIN_HOME, SCRIPT))
 
     return HttpResponse("testing")
 
-# overfishing: in conjunction with decorator use auth mech like from drf
 @csrf_exempt
-def index(request):
-
-    # overfishing: test get method that writes spark stuff to s3
-    if request.method == "GET":
-        print("accessed by get")
-
-        return HttpResponse("GET RESPONSE")
+def sendfeatures(request):
 
     # json contains "label", "category", "features", "userid", and "
     # overfishing: this is a minimal version to go through one workflow execution
@@ -41,73 +26,61 @@ def index(request):
 
         # load relevant resources
         mydict = json.loads(request.body)
+        if not ('password' in mydict and mydict['password'] == PASSWORD):
+            return HttpResponse("Wrong Password")
         s3 = boto3.resource('s3')
         bucket = s3.Bucket(BUCKET_NAME)
 
         ## step 1: save extra features in s3
 
-        # update Xu
-        data = get_pickle(mydict['userid'] + ":X.pkl", bucket)
-        if data == []: # first time / new user
-            data = mydict['features']
+        # update feature data
+        data = get_pickle(mydict['userid'] + ".pkl", bucket)
+        if data == {}:
+            pass # do stuff if NOT THERE AT ALL (initialization failed)
+        elif 'features' not in data or 'labels' not in data:
+            data['features'] = mydict['features']
+            data['labels'] = [mydict['label']]
         else:
-            data = np.append(data, mydict['features'], axis=1)
-        put_pickle(mydict['userid'] + ":X.pkl", data, bucket)
-        print(data)
-
-        # update yu
-        data = get_pickle(mydict['userid'] + ":y.pkl", bucket)
-        data.append(mydict['label'])
-        put_pickle(mydict['userid'] + ":y.pkl", data, bucket)
-        print(data)
+            data['features'] = np.append(data['features'], mydict['features'], axis=1)
+            data['labels'].append(mydict['label'])
+        put_pickle(mydict['userid'] + ".pkl", data, bucket)
 
         # update miscinfo
         misc_info = get_json(MISC_INFO, bucket)
         misc_info['numpoints'] += 1
         put_json(MISC_INFO, misc_info, bucket)
-        print(misc_info)
 
         #--------
 
         ## step 2: check if data size has reached next benchmark.
         ## if data size has reached next benchmark, make new classifier
-        if misc_info['numpoints'] >= misc_info['rerunat']:
+        classifier_lock = apps.get_app_config('inventory').classifier_lock
+        if misc_info['numpoints'] >= misc_info['rerunat'] and classifier_lock.acquire(block=False):
 
-            # make new classifier
-            print("IGNORE")
+            # update rerunat now so wont get called again
+            misc_info['rerunat'] *= 2 # overfishing: not sure when to rerun again
+            put_json(MISC_INFO, misc_info, bucket)
 
-
-
-
-
-            # update rerunat
-            # misc_info['rerunat'] *= 2 # overfishing: not sure when to rerun again
-            # put_json(MISC_INFO, misc_info, bucket)
-
-
-        """
-		print(request.session)
-		print(request.user)
-		print(request.get_host())
-		"""
+            # update classifier asynchronously, release lock when done
+            p = Process(target=updateClassifier, args=(classifier_lock,))
+            p.start()
+        else:
+            if misc_info['numpoints'] < misc_info['rerunat']:
+                print "RERUNAT LATER"
+            else:
+                print "failed to get lock"
 
         return HttpResponse("POST RESPONSE")
-
     return HttpResponse("SHOULD NOT REACH HERE")
 
-# overfishing: in conjunction with decorator use auth mech
 # json request contains "userid"
 @csrf_exempt
 def init(request):
-
     if request.method == "POST":
         mydict = json.loads(request.body)
+        if not ('password' in mydict and mydict['password'] == PASSWORD):
+            return HttpResponse("Wrong Password")
         bucket = boto3.resource('s3').Bucket(BUCKET_NAME)
-
-        # update list of users
-        misc_info = get_json(MISC_INFO, bucket)
-        misc_info['users'].append(mydict['userid'])
-        put_json(MISC_INFO, misc_info, bucket)
 
         # send Z
         Z = get_pickle(Z_FILE, bucket)
@@ -115,44 +88,52 @@ def init(request):
 
     return HttpResponse("GET does not do anything for init")
 
-# overfishing: use auth mech not just decorator
 # json request contains "userid" and "Zu"
 @csrf_exempt
 def init2(request):
-
-    # upload Tu
     if request.method == "POST":
         bucket = boto3.resource('s3').Bucket(BUCKET_NAME)
         mydict = json.loads(request.body)
+        if not ('password' in mydict and mydict['password'] == PASSWORD):
+            return HttpResponse("Wrong Password")
+
+        # upload Tu
         Z = get_pickle(Z_FILE, bucket)
-        Tu = pickleML.findTu(Z, mydict['Zu'])
-        put_pickle(mydict['userid'] + ":T.pkl", Tu, bucket)
-        return HttpResponse("Uploaded T")
+        data = get_pickle(mydict['userid'] + ".pkl", bucket)
+        data['T'] = pickleML.findTu(Z, mydict['Zu'])
+        put_pickle(mydict['userid'] + ".pkl", data, bucket)
 
+        # update list of users
+        misc_info = get_json(MISC_INFO, bucket)
+        misc_info['users'].append(mydict['userid'])
+        put_json(MISC_INFO, misc_info, bucket)
 
+        return HttpResponse("Uploaded T and updated list of users")
 
     return HttpResponse("GET does not do anything for init2")
 
-# overfishing: in conjunction with decorator use auth mech
 @csrf_exempt
 def meancov(request):
 
     # json contains 'means' and 'covs' 2d arrays, as well as 'userid'
     if request.method == "POST":
         mydict = json.loads(request.body)
+        if not ('password' in mydict and mydict['password'] == PASSWORD):
+            return HttpResponse("Wrong Password")
         bucket = boto3.resource('s3').Bucket(BUCKET_NAME)
         put_pickle(mydict['userid'] + ":means.pkl", mydict['means'], bucket)
         put_pickle(mydict['userid'] + ":covs.pkl", mydict['covs'], bucket)
         return HttpResponse("response from meancov")
 
-    return HttpResponse("post request unsuccessful")
+    return HttpResponse("did not do post request on meancov")
+
+## --------------------------------
+
 
 # update classifier
 # to be called asynchronously
 # launch cluster, submit classifier construction/modification to cluster, terminate cluster
-def updateClassifier():
-
-    # acquire lock
+def updateClassifier(classifier_lock):
 
     # launch spark cluster
     # overfishing WORKS
@@ -164,7 +145,7 @@ def updateClassifier():
               "launch {1}".format(EC2_HOME, CLUSTER_NAME))
     """
 
-    # submit script
+    # submit script locally
     os.system("{0}/spark-submit "
               "--class org.apache.spark.examples.SparkPi "
               "--master local[2] "
@@ -172,7 +153,7 @@ def updateClassifier():
 
     # terminate cluster
     # overfishing UNTESTED
-    #os.system("{0}/spark-ec2 destroy {1}".format(EC2_HOME, CLUSTER_NAME))
+    # os.system("{0}/spark-ec2 destroy {1}".format(EC2_HOME, CLUSTER_NAME))
 
+    classifier_lock.release()
 
-    # release lock
