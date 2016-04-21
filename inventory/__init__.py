@@ -1,5 +1,6 @@
 from django.apps import AppConfig
 from multiprocessing import Lock
+from pyspark import SparkContext
 
 # startup code
 class MyAppConfig(AppConfig):

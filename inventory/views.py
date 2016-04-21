@@ -10,6 +10,11 @@ from django.views.decorators.csrf import csrf_exempt
 
 import boto3
 
+from pyspark import SparkContext
+
+sc = SparkContext("local", "Pickle")
+
+
 @csrf_exempt
 def testing(request):
 
@@ -18,7 +23,7 @@ def testing(request):
 @csrf_exempt
 def sendfeatures(request):
 
-    # json contains "label", "category", "features", "userid", and "
+    # json contains "label", "category", "features", and "userid"
     # overfishing: this is a minimal version to go through one workflow execution
     # overfishing: later on i will add rds integration and other good stuff
     # note: files have names like userid:X, userid:cov, userid:mean, etc
@@ -72,6 +77,26 @@ def sendfeatures(request):
 
         return HttpResponse("POST RESPONSE")
     return HttpResponse("SHOULD NOT REACH HERE")
+
+# json request contains "userid", "category", and "features"
+@csrf_exempt
+def getclass(request):
+    if request.method == "POST":
+        mydict = json.loads(request.body)
+        if not ('password' in mydict and mydict['password'] == PASSWORD):
+            return HttpResponse("Wrong Password")
+        bucket = boto3.resource('s3').Bucket(BUCKET_NAME)
+        client = boto3.client('s3')
+
+        # return classification
+        rfm = get_rfc_model(RFCM, bucket, client, sc)
+        if rfm:
+            pred = INTTOLABEL[int(rfm.predict(mydict['features']))]
+            print(pred)
+            return HttpResponse(pred)
+        else:
+            print("Classifier not ready yet")
+            return HttpResponse("Classifier not ready yet.")
 
 # json request contains "userid"
 @csrf_exempt
